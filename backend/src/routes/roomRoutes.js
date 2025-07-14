@@ -6,5 +6,7 @@ router.post('/', roomController.createRoom);
 router.get('/:code', roomController.getByRoomId);
 router.post('/:code/question', roomController.createQuestions);
 router.get('/:code/question', roomController.getQuestions);
+router.delete('/:code', roomController.deleteRoom);
+router.delete('/question/:id', roomController.deleteQuestion);
 
 module.exports = router;

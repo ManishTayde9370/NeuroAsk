@@ -1,10 +1,11 @@
+// models/Rooms.js
 const mongoose = require('mongoose');
 
 const roomsSchema = new mongoose.Schema({
-    roomCode: { type: String, required: true, unique: true },
-    createdBy: { type: String },
-    isActive: { type: Boolean, default: true },
-    createdAt: { type: Date, default: Date.now }
+  roomCode: { type: String, required: true, unique: true },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  isActive: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now }
 });
 
 module.exports = mongoose.model("Rooms", roomsSchema);
