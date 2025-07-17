@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 
 const roomsSchema = new mongoose.Schema({
   roomCode: { type: String, required: true, unique: true },
-  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  createdBy: { type: String, required: true }, // Accept string name instead of ObjectId
   isActive: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });

@@ -5,10 +5,10 @@ const Questions = require("../models/Questions");
 const roomController = {
   createRoom: async (req, res) => {
     try {
-      const createdBy = req.body.createdBy || req.user?._id; // from body or auth middleware
+      const createdBy = req.body.createdBy || req.body.name || "Anonymous"; // Accept string name
 
-      if (!mongoose.Types.ObjectId.isValid(createdBy)) {
-        return res.status(400).json({ message: "Invalid user ID format" });
+      if (!createdBy || typeof createdBy !== "string" || !createdBy.trim()) {
+        return res.status(400).json({ message: "Name is required to create a room" });
       }
 
       const code = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -18,7 +18,7 @@ const roomController = {
         createdBy,
       });
 
-      res.json(room);
+      res.json({ roomCode: room.roomCode });
     } catch (error) {
       console.error("createRoom error:", error);
       res.status(500).json({ message: "Internal server error" });
@@ -47,10 +47,13 @@ const roomController = {
       const roomCode = req.params.code;
 
       const question = await Questions.create({
-        roomCode,
-        content,
-        user,
+        roomCode: roomCode,
+        content: content,
+        user: user,
       });
+
+      const io = req.app.get("io");
+      io.to(roomCode).emit("newQuestion", question);
 
       res.json(question);
     } catch (error) {
@@ -116,7 +119,13 @@ const roomController = {
         return res.status(403).json({ message: "Unauthorized to delete this question" });
       }
 
+      const roomCode = question.roomCode;
       await question.deleteOne();
+
+      // Emit delete event to all clients in the room
+      const io = req.app.get("io");
+      io.to(roomCode).emit("deleteQuestion", questionId);
+
       res.json({ message: "Question deleted successfully" });
     } catch (error) {
       console.error("deleteQuestion error:", error);

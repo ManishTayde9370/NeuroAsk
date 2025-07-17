@@ -24,9 +24,10 @@ function CreateRoom() {
   const handleSubmit = async () => {
     if (validate()) {
       try {
+        localStorage.setItem("participant-name", name); // Store name for later use
         const response = await axios.post(
           `${serverEndpoint}/room`,
-          { createdBy: name },
+          { createdBy: name }, // Send name as createdBy
           { withCredentials: true }
         );
         const roomCode = response.data.roomCode;
