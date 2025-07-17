@@ -1,4 +1,6 @@
 require('dotenv').config();
+require('dotenv').config({ path: './.env' });
+
 
 const express = require('express');
 const cors = require('cors');
@@ -8,6 +10,7 @@ const http = require('http');  //Part of core node api/module which enables crea
 const { Server } = require('socket.io');
 
 const roomRoutes = require('./src/routes/roomRoutes');
+const authRoutes = require('./src/routes/authRoutes');
 
 const app = express();
 app.use(express.json());
@@ -45,10 +48,9 @@ io.on("connection",(socket)=>{
         console.log(`User joined room: ${roomCode}`);
     });
 
-    // Add handler for 'join' event for compatibility with frontend
     socket.on("join", (roomCode) => {
         socket.join(roomCode);
-        console.log(`User joined room (via 'join'): ${roomCode}`);
+        console.log(`User joined room: ${roomCode}`);
     });
 
     socket.on("disconnect",()=>{
@@ -59,10 +61,13 @@ io.on("connection",(socket)=>{
 app.set("io",io);
 
 app.use('/room', roomRoutes);
+app.use('/auth', authRoutes);
 
 const PORT = process.env.PORT || 5000;
 
 app.get('/', (req, res) => res.send('Smart-QA backend live!'));
+console.log("Loaded MONGODB_URL:", process.env.MONGODB_URL);
+
 
 server.listen(PORT, (error) => {
     if (error) {

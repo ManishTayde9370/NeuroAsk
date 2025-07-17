@@ -1,6 +1,6 @@
 import { useParams } from "react-router-dom";
 import Question from "./Question";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { serverEndpoint } from "../config/appConfig";
 import axios from "axios";
 import { io } from "socket.io-client";
@@ -22,24 +22,122 @@ function Room() {
   const { code } = useParams();
   const [questions, setQuestions] = useState([]);
   const [socket, setSocket] = useState(null);
-  const currentUser = localStorage.getItem("participant-name") || "Anonymous";
+  const [roomExists, setRoomExists] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isCreator, setIsCreator] = useState(false);
+  const [summaries, setSummaries] = useState([]);
+  const [roomData, setRoomData] = useState(null);
+  const [errors, setErrors] = useState({});
+  const codeRef = useRef(null);
+
+  const fetchSummary = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.log('No token available for summary fetch');
+        return;
+      }
+      
+      const response = await axios.get(`${serverEndpoint}/room/${code}/summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true
+      });
+      setSummaries(response.data || []); 
+    } catch (error) {
+      console.log(error);
+      if (error.response?.status === 403) {
+        // User is not the creator, this is expected
+        console.log('User is not the room creator, cannot fetch summary');
+      } else {
+        setErrors({ message: 'Unable to fetch summary, please try again' });
+      }
+    }
+  };
+
+  const fetchRoom = async () => {
+    try {
+      const response = await axios.get(`${serverEndpoint}/room/${code}`, {
+        withCredentials: true
+      });
+      setRoomData(response.data);
+      return response.data;
+    } catch (error) {
+      console.log(error);
+      if (error.response?.status === 404) {
+        setRoomExists(false);
+      }
+      return null;
+    }
+  };
+
+  // Fetch current user info from backend
+  const fetchCurrentUser = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    try {
+      const res = await axios.get(`${serverEndpoint}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true
+      });
+      setCurrentUser(res.data.user);
+      return res.data.user;
+    } catch (err) {
+      setCurrentUser(null);
+      return null;
+    }
+  };
 
   useEffect(() => {
-    // Fetch initial questions
-    const fetchQuestions = async () => {
-      try {
-        const res = await axios.get(`${serverEndpoint}/room/${code}/question`, { withCredentials: true });
-        setQuestions(res.data);
-      } catch (err) {
-        setQuestions([]);
+    const setup = async () => {
+      const user = await fetchCurrentUser();
+      const room = await fetchRoom();
+      if (!room) {
+        setRoomExists(false);
+        setLoading(false);
+        return;
       }
+      if (user && room.createdBy === user.id) {
+        setIsCreator(true);
+      } else {
+        setIsCreator(false);
+      }
+      // Fetch initial questions
+      const fetchQuestions = async () => {
+        try {
+          const res = await axios.get(`${serverEndpoint}/room/${code}/question`, { withCredentials: true });
+          setQuestions(res.data);
+          return res.data;
+        } catch (err) {
+          setQuestions([]);
+          return [];
+        }
+      };
+      const questionsData = await fetchQuestions();
+      
+      // Fetch summary if there are questions
+      if (questionsData.length > 0) {
+        await fetchSummary();
+      }
+      
+      setLoading(false);
     };
-    fetchQuestions();
+
+    // Execute validation and setup
+    setup();
 
     // Connect to socket.io
     const sock = io(serverEndpoint);
     setSocket(sock);
-    sock.emit("join", code);
+    
+    sock.on("connect", () => {
+      console.log("Connected to server");
+      sock.emit("join", code);
+    });
+
+    sock.on("connect_error", (error) => {
+      console.error("Socket connection error:", error);
+    });
 
     // Listen for new questions
     sock.on("newQuestion", (question) => {
@@ -64,24 +162,109 @@ function Room() {
           data: { userId: currentUser },
           withCredentials: true
         });
-        setQuestions((prev) => prev.filter(q => q._id !== id));
-        if (socket) socket.emit("deleteQuestion", { roomCode: code, questionId: id });
+        // Note: The backend already emits the deleteQuestion event, so we don't need to emit here
+        // The socket listener will handle the UI update automatically
       } catch (err) {
         alert("Failed to delete question: " + (err.response?.data?.message || err.message));
       }
     }
   };
 
+  // Copy room code to clipboard
+  const handleCopyCode = () => {
+    if (codeRef.current) {
+      navigator.clipboard.writeText(codeRef.current.textContent);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="container text-center py-5">
+        <div className="spinner-border" role="status">
+          <span className="visually-hidden">Loading...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!roomExists) {
+    return (
+      <div className="container text-center py-5">
+        <h2>Room Not Found</h2>
+        <p>The room you're looking for doesn't exist or has been deleted.</p>
+        <a href="/" className="btn btn-primary">Go Home</a>
+      </div>
+    );
+  }
+
   return (
     <div className="container chat-app-container py-5">
-      <h2 className="chat-room-title">Room {code}</h2>
+      {/* Room Header */}
+      <div className="d-flex align-items-center justify-content-between mb-2">
+        <div>
+          <h2 className="chat-room-title mb-0">Room <span ref={codeRef}>{code}</span></h2>
+          {roomData && (
+            <div className="d-flex align-items-center mt-1">
+              <span className="badge bg-info me-2">{isCreator ? "Owner" : "Participant"}</span>
+              <span className="chat-room-creator text-muted">
+                <i className="bi bi-person-circle me-1"></i>
+                {roomData.creatorEmail || "Unknown"}
+              </span>
+              <span className="ms-2" title="The owner can generate summaries. Participants can post questions.">
+                <i className="bi bi-info-circle text-secondary"></i>
+              </span>
+            </div>
+          )}
+        </div>
+        <button className="btn btn-outline-secondary btn-sm" onClick={handleCopyCode} title="Copy Room Code">
+          <i className="bi bi-clipboard"></i>
+        </button>
+      </div>
+      {/* Divider */}
+      <hr className="mb-4" />
+      {/* Summary Section */}
+      <div className="summary-section mb-4">
+        <div className="d-flex justify-content-between align-items-center mb-2">
+          <h5 className="summary-title mb-0">Question Summary</h5>
+          {isCreator && (
+            <button 
+              className="btn btn-sm btn-outline-primary"
+              onClick={fetchSummary}
+              disabled={questions.length === 0}
+            >
+              <i className="bi bi-lightbulb me-1"></i>Refresh Summary
+            </button>
+          )}
+        </div>
+        {summaries.length > 0 ? (
+          <div className="summary-content">
+            {summaries.map((summary, index) => (
+              <div key={index} className="summary-item">
+                <i className="bi bi-chat-left-text me-2 text-primary"></i>{summary}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="summary-empty text-muted">
+            {questions.length === 0 ? (
+              <span><i className="bi bi-emoji-frown me-1"></i>No questions yet. Ask the first question!</span>
+            ) : (
+              isCreator ? 'Click "Refresh Summary" to generate a summary of questions.' : 'Summary not available yet.'
+            )}
+          </div>
+        )}
+      </div>
+      {/* Divider */}
+      <hr className="mb-4" />
       <div className="chat-box">
         <div className="chat-messages">
           {questions.length === 0 ? (
-            <div className="chat-empty">No messages yet.</div>
+            <div className="chat-empty text-center text-muted">
+              <i className="bi bi-inbox me-2"></i>No messages yet.
+            </div>
           ) : (
             questions.map((q) => {
-              const isCurrentUser = q.user === currentUser;
+              const isCurrentUser = currentUser && q.user === currentUser.email;
               return (
                 <div
                   key={q._id}
@@ -89,7 +272,10 @@ function Room() {
                 >
                   {!isCurrentUser && (
                     <div className="chat-avatar">
-                      <div className="avatar-circle">{getInitials(q.user)}</div>
+                      <div className="avatar-circle">
+                        <i className="bi bi-person"></i>
+                        {getInitials(q.user)}
+                      </div>
                     </div>
                   )}
                   <div className="chat-bubble-group">
@@ -104,14 +290,17 @@ function Room() {
                           className="btn btn-sm btn-danger chat-delete-btn"
                           onClick={() => handleDelete(q._id, q.user)}
                         >
-                          Delete
+                          <i className="bi bi-trash"></i> Delete
                         </button>
                       )}
                     </div>
                   </div>
                   {isCurrentUser && (
                     <div className="chat-avatar">
-                      <div className="avatar-circle avatar-user">{getInitials(q.user)}</div>
+                      <div className="avatar-circle avatar-user">
+                        <i className="bi bi-person"></i>
+                        {getInitials(q.user)}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -119,8 +308,21 @@ function Room() {
             })
           )}
         </div>
-        <Question roomCode={code} />
+        {/* Only show Question input if NOT the creator */}
+        {!isCreator && <Question roomCode={code} />}
       </div>
+      {/* Toast for errors */}
+      {errors.message && (
+        <div className="toast show position-fixed bottom-0 end-0 m-4" style={{zIndex: 9999, minWidth: 300}}>
+          <div className="toast-header bg-danger text-white">
+            <i className="bi bi-exclamation-triangle me-2"></i>
+            <strong className="me-auto">Error</strong>
+            <button type="button" className="btn-close btn-close-white ms-2 mb-1" onClick={() => setErrors({})}></button>
+          </div>
+          <div className="toast-body">{errors.message}</div>
+        </div>
+      )}
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" />
       <style>{`
         .chat-app-container {
           max-width: 700px;
@@ -128,9 +330,43 @@ function Room() {
         }
         .chat-room-title {
           text-align: center;
-          margin-bottom: 1.5rem;
+          margin-bottom: 0.5rem;
           font-weight: 700;
           color: #3b3b3b;
+        }
+        .chat-room-creator {
+          font-size: 0.95rem;
+          color: #666;
+          margin-bottom: 1.5rem;
+        }
+        .summary-section {
+          background: #fff;
+          border-radius: 12px;
+          padding: 1.2rem;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+          border: 1px solid #e8e8e8;
+        }
+        .summary-title {
+          color: #3b3b3b;
+          font-weight: 600;
+        }
+        .summary-content {
+          max-height: 200px;
+          overflow-y: auto;
+        }
+        .summary-item {
+          padding: 0.5rem 0;
+          border-bottom: 1px solid #f0f0f0;
+          font-size: 0.95rem;
+          line-height: 1.4;
+        }
+        .summary-item:last-child {
+          border-bottom: none;
+        }
+        .summary-empty {
+          text-align: center;
+          padding: 1rem;
+          font-style: italic;
         }
         .chat-box {
           background: #f4f7fa;

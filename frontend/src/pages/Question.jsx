@@ -25,15 +25,23 @@ function Question({ roomCode }) {
     if (validate()) {
       setLoading(true);
       try {
-        const participantName = localStorage.getItem("participant-name") || "Anonymous";
+        const token = localStorage.getItem("token");
+        if (!token) {
+          setErrors({ message: "Please login first" });
+          return;
+        }
+
         const response = await axios.post(
           `${serverEndpoint}/room/${roomCode}/question`,
-          { content: question, user: participantName },
-          { withCredentials: true }
+          { content: question },
+          { 
+            headers: { Authorization: `Bearer ${token}` },
+            withCredentials: true 
+          }
         );
         setQuestion("");
       } catch (error) {
-        setErrors({ message: "Error posting question, please try again" });
+        setErrors({ message: error.response?.data?.message || "Error posting question, please try again" });
       } finally {
         setLoading(false);
       }
